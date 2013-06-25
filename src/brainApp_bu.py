@@ -11,6 +11,8 @@ from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg
 from matplotlib.figure import Figure
 from mpl_toolkits.axes_grid import AxesGrid
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid.inset_locator import inset_axes
+from mpl_toolkits.axes_grid.colorbar import colorbar
 
 class BrainFrame(wx.Frame):
     def __init__(self, parent, id):
@@ -28,7 +30,7 @@ class BrainFrame(wx.Frame):
         #self.canvas.SetScrollbar(wx.HORIZONTAL, 0, 5,self.scroll_range)
         self.init_data()
         self.init_panel()
-        self.init_plot()
+        self.draw_plot()
 
     def init_panel(self):
         # initialize menubar
@@ -91,12 +93,8 @@ class BrainFrame(wx.Frame):
             nii_files = sorted (glob.glob( os.path.join(path, '*.img')), key = str.lower)
             nim = NiftiImage(nii_files[0])
             self.num_figs = len(nii_files) #time axis
-            (self.brainZ,self.brainX,self.brainY) = num.shape(nim.data) # 3D axis
-            self.Data  = num.zeros((self.num_figs,self.brainZ,self.brainX,self.brainY)) # Data allocation of memory
-            print self.brainZ
-            print self.brainX
-            print self.brainY
-            print self.num_figs
+            (self.len_z,self.len_x,self.len_y) = num.shape(nim.data) # 3D axis
+            self.Data  = num.zeros((self.num_figs,self.len_z,self.len_x,self.len_y)) # Data allocation of memory
 
             for i in range(self.num_figs):
                 nim = NiftiImage(nii_files[i])
@@ -109,25 +107,47 @@ class BrainFrame(wx.Frame):
             print '\nNo Brain data my friend...\n'
 
         
+        self.pos_t = 0
+        self.pos_x = int(self.len_x/2)
+        self.pos_y = int(self.len_y/2)
+        self.pos_z = int(self.len_z/2)
 
-    
-    def init_plot(self):
+
+    def draw_plot(self):
+
         """Draw data."""
-        plt.jet()
-        """(frames,z,x,y) = num.shape(self.Data) # 4D axis
-        for t in range(frames):
-            filename = "Images/Im_" + str(t) + ".png"
-            for self.n in range(36):
-                self.subplot = self.fig.add_subplot( 6,6,self.n+1)
-                self.subplot.imshow(self.Data[t,self.n,:,:], interpolation='nearest')
-            self.fig.savefig(filename)"""
-        vmax = self.Data[0].max()
-        vmin = self.Data[0].min()                
+
+        #self.fig.canvas.mpl_connect('button_press_event', self.onclick)
+        #self.fig.canvas.mpl_connect('axes_enter_event', self.enter_axes)
+        #fig = plt.figure()
+        #self.canvas = FigureCanvasWxAgg(self, -1,fig)
+        vmax = self.Data[self.pos_t].max()
+        vmin = self.Data[self.pos_t].min()
+        
+        m1 = self.Data[self.pos_t,self.pos_z,:,:]
+        m2 = self.Data[self.pos_t,::-1,self.pos_y,:]
+        m3 = self.Data[self.pos_t,::-1,:,self.pos_x]
+        
+        for i, m in enumerate([m1, m2, m3]):
+           ax = self.fig.add_subplot(2,2,i+1)
+           axins = inset_axes(ax,width="5%",  height="100%", loc=3,bbox_to_anchor=(1.05, 0., 1, 1),bbox_transform=ax.transAxes,
+                              borderpad=0)
+           im = ax.imshow(m, vmin=vmin, vmax=vmax,interpolation='nearest')
+           #im = ax.imshow(m, vmin=vmin, vmax=vmax)
+           colorbar(im, cax=axins) #ticks=["lo", "med", "hi"]
+            
+        ax = self.fig.add_subplot(224)
+        ax.plot(self.Data[:,self.pos_z,self.pos_y,self.pos_x],color='black') #t axis
+
+        """plt.jet()
+
+        vmax = self.Data[self.pos_t].max()
+        vmin = self.Data[self.pos_t].min()                
         grid = AxesGrid(self.fig, 111, # similar to subplot(111) 
-        nrows_ncols = (4, 7),axes_pad = 0.2,share_all=True,
+        nrows_ncols = (2, 2),axes_pad = 0.2,share_all=True,
         cbar_location = "top",cbar_mode="single")
-        for n in range(self.brainZ):
-            im = grid[n].imshow(self.Data[0][n,:,:], vmin=vmin, vmax=vmax,interpolation="nearest")
+        for n in range(3):
+            im = grid[n].imshow(self.Data[self.pos_t][n,:,:], vmin=vmin, vmax=vmax,interpolation="nearest")
         
         grid.cbar_axes[0].colorbar(im)
         for cax in grid.cbar_axes:
@@ -136,17 +156,17 @@ class BrainFrame(wx.Frame):
         grid.axes_llc.set_xticks([0, 30, 60])
         grid.axes_llc.set_yticks([0, 30, 60])
     
-        self.canvas.draw()
+        self.canvas.draw()"""
 
-    def draw_plot(self):
+
         """Draw data."""               
-        vmax = self.Data[self.pos1].max()
+        """vmax = self.Data[self.pos1].max()
         vmin = self.Data[self.pos1].min()                
         grid = AxesGrid(self.fig, 111, # similar to subplot(111) 
         nrows_ncols = (4, 7),axes_pad = 0.2,share_all=True,
         cbar_location = "top",cbar_mode="single")
         for n in range(self.brainZ):
-            im = grid[n].imshow(self.Data[self.pos1][n,:,:], vmin=vmin, vmax=vmax,interpolation="nearest")
+            im = grid[n].imshow(self.Data[self.pos_t][n,:,:], vmin=vmin, vmax=vmax,interpolation="nearest")
         
         grid.cbar_axes[0].colorbar(im)
         for cax in grid.cbar_axes:
@@ -155,11 +175,11 @@ class BrainFrame(wx.Frame):
         grid.axes_llc.set_xticks([0, 30, 60])
         grid.axes_llc.set_yticks([0, 30, 60])
        
-        self.canvas.draw()
+        self.canvas.draw()"""
 
     def slider1Update(self, event):
         # get the slider position
-        self.pos1 = self.slider1.GetValue()
+        self.pos_t = self.slider1.GetValue()
         #print self.pos1
         # set the gauge position
         self.draw_plot()
@@ -168,7 +188,7 @@ class BrainFrame(wx.Frame):
         # Set the slider position
         if(self.slider1.GetValue()>0):
             self.slider1.SetValue(self.slider1.GetValue()-1)
-            self.pos1 = self.slider1.GetValue()
+            self.pos_t = self.slider1.GetValue()
             #print "prev_click: ", self.pos1
             self.draw_plot()
 
@@ -176,7 +196,7 @@ class BrainFrame(wx.Frame):
         # Set the slider position
         if(self.slider1.GetValue()<self.num_figs):
             self.slider1.SetValue(self.slider1.GetValue()+1)
-            self.pos1 = self.slider1.GetValue()
+            self.pos_t = self.slider1.GetValue()
             #print "next_click: ", self.pos1
             self.draw_plot()
 

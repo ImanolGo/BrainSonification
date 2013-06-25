@@ -257,6 +257,10 @@ class MyFrame(wx.Frame):
             self.slider1Update(event)
             #print "next_click: ", self.pos1
     
+    def OnExit(self, event):
+        self.timer.Stop()
+        self.Close()
+    
 class run(wx.App):
     def __init__(self,  redirect=False,clargs=None):
         # call parent class initializer
