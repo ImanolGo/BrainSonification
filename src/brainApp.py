@@ -2,6 +2,7 @@
 
 from nifti import *
 import osc_send as sn
+import utils
 import numpy as num
 import wx
 import os, glob
@@ -106,6 +107,8 @@ class BrainFrame(wx.Frame):
         self.best_voxels_ind = []
         self.portNum = 9001
         self.osc = sn.osc_send(self.portNum)
+        self.T = 2 #The sample period 
+        self.Fs = 1.0/self.T #The frequency
         self.cmap = Trait(gmt_drywet, Callable) #gmt_drywet,jet
         
         self.init_panel()
@@ -292,59 +295,17 @@ class BrainFrame(wx.Frame):
         self.slice_z = rest/self.len_x #z axis"""
         self.vals = self.Data[self.pos_t,:,:,:]
         self.Voxel = self.Data[:,self.slice_z,self.slice_x,self.slice_y]
-        
+        [self.FFTVoxel,self.frqs] = utils.calcFFT(self.Voxel,self.Fs) 
+        [self.maxtab, self.mintab ]= utils.peakdet(self.FFTVoxel,0.01)
+        print self.maxtab[:,0]
+        print self.maxtab[:,1]
+        indexes = list(self.maxtab[:,0])
+        print self.frqs
+        print self.frqs[indexes]
 
     def draw_plot(self):
         """Draw data."""
-        
-        """plt.jet()
-
-        self.fig.canvas.mpl_connect('button_press_event', self.onclick)
-        self.fig.canvas.mpl_connect('axes_enter_event', self.enter_axes)
-
-        vmax = self.Data[self.pos_t].max()
-        vmin = self.Data[self.pos_t].min()                
-        grid = AxesGrid(self.fig, 111, # similar to subplot(111) 
-        nrows_ncols = (2, 2),axes_pad = 0.2,share_all=True,
-        cbar_location = "top",cbar_mode="single")
-        for n in range(3):
-            im = grid[n].imshow(self.Data[self.pos_t][n,:,:], vmin=vmin, vmax=vmax,interpolation="nearest")
-        
-        grid.cbar_axes[0].colorbar(im)
-        for cax in grid.cbar_axes:
-            cax.toggle_label(False)
-        # This affects all axes as share_all = True.
-        grid.axes_llc.set_xticks([0, 30, 60])
-        grid.axes_llc.set_yticks([0, 30, 60])
-    
-        self.canvas.draw()"""
-
-
-        plt.jet()
-        self.fig.clear()
-        self.fig.canvas.mpl_connect('button_press_event', self.onclick)
-        self.fig.canvas.mpl_connect('axes_enter_event', self.enter_axes)
-        #fig = plt.figure()
-        #self.canvas = FigureCanvasWxAgg(self, -1,fig)
-        vmax = self.Data[self.pos_t].max()
-        vmin = self.Data[self.pos_t].min()
-        
-        m1 = self.Data[self.pos_t,self.pos_z,:,:]
-        m2 = self.Data[self.pos_t,::-1,self.pos_y,:]
-        m3 = self.Data[self.pos_t,::-1,:,self.pos_x]
-        
-        for i, m in enumerate([m1, m2, m3]):
-           ax = self.fig.add_subplot(2,2,i+1)
-           axins = inset_axes(ax,width="5%",  height="100%", loc=3,bbox_to_anchor=(1.05, 0., 1, 1),bbox_transform=ax.transAxes,
-                              borderpad=0)
-           im = ax.imshow(m, vmin=vmin, vmax=vmax,interpolation='nearest')
-           #im = ax.imshow(m, vmin=vmin, vmax=vmax)
-           colorbar(im, cax=axins) #ticks=["lo", "med", "hi"]
-            
-        ax = self.fig.add_subplot(224)
-        ax.plot(self.Data[:,self.pos_z,self.pos_y,self.pos_x],color='black') #t axis
                      
-       
         self.canvas.draw()
 
 
@@ -393,6 +354,8 @@ class BrainFrame(wx.Frame):
     
     def updateSlices(self):
         self.Voxel = self.Data[:,self.slice_z,self.slice_x,self.slice_y]
+        [self.FFTVoxel,self.frqs] = utils.calcFFT(self.Voxel,self.Fs) 
+        [self.maxtab, self.mintab ]= utils.peakdet(self.FFTVoxel,0.01)
         self._update_images()
         self.center.invalidate_and_redraw()
         self.right.invalidate_and_redraw()
@@ -407,7 +370,7 @@ class BrainFrame(wx.Frame):
     def slider3Update(self, event):
         pos_slider3 = self.slider3.GetValue()
         self.clkFreq = (self.MaxSlider3 + self.MinSlider3) - pos_slider3
-        self.osc.send_IVT(self.clkFreq)
+        #self.osc.send_IVT(self.clkFreq)
         fSpeed = 1000.0/self.clkFreq
         strSpeed = "%.2f Frames/s" % fSpeed
         self.TextSpeed.SetLabel(strSpeed)
@@ -560,6 +523,7 @@ class BrainFrame(wx.Frame):
             self.slider1Update(event)
             self._update_images()
             self.timePlotBig.invalidate_and_redraw()
+            self.freqPlotBig.invalidate_and_redraw()
             self.timePlot.invalidate_and_redraw()
         else:
             if plane == "xy":
@@ -582,6 +546,8 @@ class BrainFrame(wx.Frame):
             string= "Voxel Energy: %.2f" % self.Data[self.pos_t,self.slice_z,self.slice_x,self.slice_y]
             self.TextVoxelEnergy.SetLabel(string)
             self.Voxel = self.Data[:,self.slice_z,self.slice_x,self.slice_y]
+            [self.FFTVoxel,self.frqs] = utils.calcFFT(self.Voxel,self.Fs) 
+            [self.maxtab, self.mintab ]= utils.peakdet(self.FFTVoxel,0.01)
             self.CtrlSliceX.SetValue(self.slice_x) 
             self.CtrlSliceY.SetValue(self.slice_y) 
             self.CtrlSliceZ.SetValue(self.slice_z) 
@@ -614,6 +580,8 @@ class BrainFrame(wx.Frame):
         string= "Voxel Energy: %.2f" % self.Data[self.pos_t,self.slice_z,self.slice_x,self.slice_y]
         self.TextVoxelEnergy.SetLabel(string)
         self.Voxel = self.Data[:,self.slice_z,self.slice_x,self.slice_y]
+        [self.FFTVoxel,self.frqs] = utils.calcFFT(self.Voxel,self.Fs) 
+        [self.maxtab, self.mintab ]= utils.peakdet(self.FFTVoxel,0.01)
         self._update_images()
         self.center.invalidate_and_redraw()
         self.right.invalidate_and_redraw()
@@ -633,9 +601,10 @@ class BrainFrame(wx.Frame):
         self.plotdata = ArrayPlotData()
         self.plotdataVoxel = ArrayPlotData()
         self.plotdataSlices = ArrayPlotData()
+        self.plotdataVoxelFFT = ArrayPlotData()
         self._update_images()
         
-         # Center Plot
+         # Top Left plot
         centerplot = Plot(self.plotdata, resizable= 'hv', padding=20, title = "Slice_X")
         imgplot=centerplot.img_plot("yz", 
                                  xbounds= None,
@@ -651,7 +620,7 @@ class BrainFrame(wx.Frame):
         imgplot.overlays.append(self.cursorYZ)
         self.center = imgplot
 
-        # Right Plot
+        # Top Right Plot
         rightplot = Plot(self.plotdata, resizable= 'hv', padding=20,title = "Slice_Y")
         rightplot.x_axis.title = "X"
         rightplot.y_axis.title = "Z" 
@@ -667,7 +636,7 @@ class BrainFrame(wx.Frame):
         imgplot.overlays.append(self.cursorXZ)
         self.right = imgplot
 
-        # Bottom Plot
+        # Bottom  LeftPlot
         bottomplot = Plot(self.plotdata, resizable= 'hv',padding=20, title = "Slice_Z")
         bottomplot.x_axis.title = "Y"
         bottomplot.y_axis.title = "X"
@@ -720,6 +689,13 @@ class BrainFrame(wx.Frame):
                 line_width=1, bgcolor = "white", border_visible=True, name = "time")[0]
         self.timePlotBig = timeplotBig 
 
+        # Create data series to plot
+        freqplotBig = Plot(self.plotdataVoxelFFT, resizable= 'hv', padding=20)
+        freqplotBig.x_axis.title = "Frequency (Hz)"
+        freqplotBig.plot("FreqVoxel", color = 'lightblue', line_width=1.5, bgcolor="white", name = "Time")[0]        
+        freqplotBig.legend.visible = True
+        self.freqPlotBig = freqplotBig 
+
         #self.time = time
         # Create a GridContainer to hold all of our plots
         container = GridContainer(padding=10, fill_padding=True,
@@ -729,12 +705,17 @@ class BrainFrame(wx.Frame):
                               bgcolor="white", use_backbuffer=True,
                               shape=(1,1), spacing=(5,5))
 
+        containerFreq = GridContainer(padding=10, fill_padding=True,
+                              bgcolor="white", use_backbuffer=True,
+                              shape=(1,1), spacing=(5,5))
+
         
         container.add(centerplot)
         container.add(rightplot)
         container.add(bottomplot)
         container.add(timeplot)
         containerTime.add(timeplotBig)
+        containerFreq.add(freqplotBig)
         
         """container = GridContainer(padding=10, fill_padding=True,
                               bgcolor="white", use_backbuffer=True,
@@ -749,12 +730,14 @@ class BrainFrame(wx.Frame):
         self.nb.DeleteAllPages()
         self.window =  Window(self.nb, -1, component=container)
         self.windowTime =  Window(self.nb, -1, component=containerTime)
+        self.windowFreq =  Window(self.nb, -1, component=containerFreq)
         self.sizer.Detach(self.topsizer)
         self.sizer.Detach(self.pnl2)
         self.topsizer.Clear()
         self.topsizer.Add(self.pnl3, 0, wx.ALL, 10)
         self.nb.AddPage(self.window.control, "fMRI Slices")
         self.nb.AddPage(self.windowTime.control, "Time Voxel")
+        self.nb.AddPage(self.windowFreq.control, "Frequency Voxel")
         self.topsizer.Add(self.nb, 1, wx.EXPAND) 
         self.sizer.Add(self.topsizer, 1, wx.EXPAND)
         self.sizer.Add(self.pnl2, flag=wx.EXPAND | wx.BOTTOM | wx.TOP, border=10)
@@ -803,6 +786,7 @@ class BrainFrame(wx.Frame):
         cube = self.colorcube
         pd = self.plotdata
         pdVoxel = self.plotdataVoxel
+        pdVoxelFFT = self.plotdataVoxelFFT
         # These are transposed because img_plot() expects its data to be in 
         # row-major order
         pd.set_data("yz", cube[:, self.slice_x, :])
@@ -820,6 +804,8 @@ class BrainFrame(wx.Frame):
         aTime[:] = num.nan
         aTime[self.pos_t]= self.Voxel[self.pos_t]
         pdVoxel.set_data("time", aTime)
+
+        pdVoxelFFT.set_data("FreqVoxel",self.FFTVoxel)
 
 class run(wx.App):
     def __init__(self,  redirect=False,clargs=None):
