@@ -117,10 +117,12 @@ class BrainFrame(wx.Frame):
         self.fftPeaks = num.zeros(self.num_figs)
         self.maxtab = num.zeros(shape=(self.num_figs,2))
 
-        self.init_panel()
         self.init_data('../data/s03_epi_snr01_xxx/')
+        self.init_panel()
+        self.update_panel()
+        self.update_voxel_data()
+        self.updateOSC()
         self.draw_plot()
-
 
     def init_panel(self):
                 # initialize menubar
@@ -138,8 +140,8 @@ class BrainFrame(wx.Frame):
         self.bestVoxelsText = wx.StaticText(self.pnl3, -1, 'Select nth principal component')
         self.bestVoxelsCtrl  = wx.SpinCtrl(self.pnl3, -1, '1', min=1, max=self.n)
         self.VAText = wx.StaticText(self.pnl3, -1, 'Voxel Analysis')
-        self.VoxeAnalysisTypes = ['Time','Frequency']
-        self.VoxelAnalysisBox = wx.ComboBox(self.pnl3,-1 , choices=self.VoxeAnalysisTypes, 
+        self.VoxelAnalysisTypes = ['Time','Frequency']
+        self.VoxelAnalysisBox = wx.ComboBox(self.pnl3,-1 , choices=self.VoxelAnalysisTypes, 
                         style=wx.CB_READONLY)
         self.VoxelAnalysisBox.SetValue('Time')
        
@@ -285,9 +287,6 @@ class BrainFrame(wx.Frame):
         self.pos_x = int(self.len_x/2)
         self.pos_y = int(self.len_y/2)
         self.pos_z = int(self.len_z/2)
-        self.slider1.SetRange(0,self.num_figs) #set the new range of slider
-        self.slider1.SetValue(0)
-        self.trackCounter.SetLabel(" 0 / " + str(self.num_figs)) 
         self.pos_t = 0
         #ind  = self.voxels_ind[0] #takes the nth best voxel
         
@@ -295,8 +294,6 @@ class BrainFrame(wx.Frame):
         self.slice_y = int(self.len_y/2)
         self.slice_z = int(self.len_z/2)
         self.vals = self.Data[self.pos_t,:,:,:]
-
-        self.update_voxel_data()
 
 
     def update_voxel_data(self):
@@ -310,19 +307,23 @@ class BrainFrame(wx.Frame):
         print self.fftPeaks 
         print "f(Hz): " 
         print self.frqsPeaks
-                    
 
-    def draw_plot(self):
-        """Draw data."""
-                     
-        self.canvas.draw()
-
+    def update_panel(self):
+        self.slider1.SetRange(0,self.num_figs) #set the new range of slider
+        self.slider1.SetValue(0)
+        self.trackCounter.SetLabel(" 0 / " + str(self.num_figs)) 
+        self.CtrlSliceX.SetRange(0,self.len_x) 
+        self.CtrlSliceX.SetValue(self.slice_x) 
+        self.CtrlSliceY.SetRange(0,self.len_y) 
+        self.CtrlSliceY.SetValue(self.slice_y) 
+        self.CtrlSliceZ.SetRange(0,self.len_z) 
+        self.CtrlSliceZ.SetValue(self.slice_z) 
 
     def VoxelAnalysisChoose(self,event):
         item = event.GetSelection()
-        if (self.FeatureSelectionTypes[item] == 'Time'): 
+        if (self.VoxelAnalysisTypes[item] == 'Time'): 
             print 'Time'
-        elif (self.FeatureSelectionTypes[item] == 'Frequency'): 
+        elif (self.VoxelAnalysisTypes[item] == 'Frequency'): 
             print 'Frequency'
         
     def enter_axes(self,event):        
@@ -369,10 +370,9 @@ class BrainFrame(wx.Frame):
         self.updateOSC()
 
     def updateOSC(self):
-        self.osc.send_frame(self.t)
-        self.osc.send_fftPeaks(self.fftPeaks)
-        self.osc.send_fftPeaks(self.frqsPeaks)
-        self.osc.send_coordinates([self.slice_x,self.slice_y,self.slice_z])
+        self.osc.send_frame(self.pos_t)
+        self.osc.send_fftPeaks(self.fftPeaks,self.frqsPeaks)
+        self.osc.send_voxel_coordinates([self.slice_x,self.slice_y,self.slice_z])
     
     def slider2Update(self, event):
         self.volumeLevel = float(self.slider2.GetValue())/100.0 #to set the volume in range [0 1]
@@ -512,11 +512,13 @@ class BrainFrame(wx.Frame):
         data_path =  str(selected[0][0:ind+1])
         dialog.Destroy()
         self.init_data(data_path)
+        self.update_voxel_data()
+        self.updateOSC()
         self.draw_plot()
 
     def draw_plot(self):
         self._create_plot_window()
-        self.SetSize(wx.Size(800, 500))
+        self.SetSize(wx.Size(1280, 800))
         self.Show(True)
         
     def _scatter_plot_default(self):
