@@ -108,9 +108,15 @@ class BrainFrame(wx.Frame):
         self.portNum = 9001
         self.osc = sn.osc_send(self.portNum)
         self.T = 2 #The sample period 
-        self.Fs = 1.0/self.T #The frequency
+        self.Fs = 1.0/self.T #The sample frequency
+        self.Fs = 44100 #The sample frequency
         self.cmap = Trait(gmt_drywet, Callable) #gmt_drywet,jet
-        
+        self.Voxel = num.zeros(self.num_figs)
+        self.FFTVoxel = num.zeros(self.num_figs)
+        self.frqs = num.zeros(self.num_figs)
+        self.fftPeaks = num.zeros(self.num_figs)
+        self.maxtab = num.zeros(shape=(self.num_figs,2))
+
         self.init_panel()
         self.init_data('../data/s03_epi_snr01_xxx/')
         self.draw_plot()
@@ -288,20 +294,23 @@ class BrainFrame(wx.Frame):
         self.slice_x = int(self.len_x/2)
         self.slice_y = int(self.len_y/2)
         self.slice_z = int(self.len_z/2)
+        self.vals = self.Data[self.pos_t,:,:,:]
 
-        """self.slice_y = ind%self.len_y #y axis
-        rest = ind/self.len_y 
-        self.slice_x = rest%self.len_x #x axis
-        self.slice_z = rest/self.len_x #z axis"""
+        self.update_voxel_data()
+
+
+    def update_voxel_data(self):
         self.vals = self.Data[self.pos_t,:,:,:]
         self.Voxel = self.Data[:,self.slice_z,self.slice_x,self.slice_y]
         [self.FFTVoxel,self.frqs] = utils.calcFFT(self.Voxel,self.Fs) 
         [self.maxtab, self.mintab ]= utils.peakdet(self.FFTVoxel,0.01)
-        print self.maxtab[:,0]
-        print self.maxtab[:,1]
-        indexes = list(self.maxtab[:,0])
-        print self.frqs
-        print self.frqs[indexes]
+        self.fftPeaks = self.maxtab[:,1]
+        self.frqsPeaks = self.frqs[list(self.maxtab[:,0])]
+        print "FTT Peaks: " 
+        print self.fftPeaks 
+        print "f(Hz): " 
+        print self.frqsPeaks
+                    
 
     def draw_plot(self):
         """Draw data."""
@@ -353,15 +362,17 @@ class BrainFrame(wx.Frame):
         self.updateSlices()
     
     def updateSlices(self):
-        self.Voxel = self.Data[:,self.slice_z,self.slice_x,self.slice_y]
-        [self.FFTVoxel,self.frqs] = utils.calcFFT(self.Voxel,self.Fs) 
-        [self.maxtab, self.mintab ]= utils.peakdet(self.FFTVoxel,0.01)
-        self._update_images()
+        self.update_voxel_data()
         self.center.invalidate_and_redraw()
         self.right.invalidate_and_redraw()
         self.bottom.invalidate_and_redraw()
-        return
-    
+        self.updateOSC()
+
+    def updateOSC(self):
+        self.osc.send_frame(self.t)
+        self.osc.send_fftPeaks(self.fftPeaks)
+        self.osc.send_fftPeaks(self.frqsPeaks)
+        self.osc.send_coordinates([self.slice_x,self.slice_y,self.slice_z])
     
     def slider2Update(self, event):
         self.volumeLevel = float(self.slider2.GetValue())/100.0 #to set the volume in range [0 1]
@@ -521,6 +532,7 @@ class BrainFrame(wx.Frame):
         if plane == "TimeVoxel":
             self.slider1.SetValue( x_index)
             self.slider1Update(event)
+            self.update_voxel_data()
             self._update_images()
             self.timePlotBig.invalidate_and_redraw()
             self.freqPlotBig.invalidate_and_redraw()
@@ -545,9 +557,8 @@ class BrainFrame(wx.Frame):
             self.cursorXZ.current_position = self.slice_x , self.slice_z
             string= "Voxel Energy: %.2f" % self.Data[self.pos_t,self.slice_z,self.slice_x,self.slice_y]
             self.TextVoxelEnergy.SetLabel(string)
-            self.Voxel = self.Data[:,self.slice_z,self.slice_x,self.slice_y]
-            [self.FFTVoxel,self.frqs] = utils.calcFFT(self.Voxel,self.Fs) 
-            [self.maxtab, self.mintab ]= utils.peakdet(self.FFTVoxel,0.01)
+            self.update_voxel_data()
+            self.updateOSC()
             self.CtrlSliceX.SetValue(self.slice_x) 
             self.CtrlSliceY.SetValue(self.slice_y) 
             self.CtrlSliceZ.SetValue(self.slice_z) 
@@ -579,9 +590,8 @@ class BrainFrame(wx.Frame):
         self.CtrlSliceY.SetValue(self.slice_y)
         string= "Voxel Energy: %.2f" % self.Data[self.pos_t,self.slice_z,self.slice_x,self.slice_y]
         self.TextVoxelEnergy.SetLabel(string)
-        self.Voxel = self.Data[:,self.slice_z,self.slice_x,self.slice_y]
-        [self.FFTVoxel,self.frqs] = utils.calcFFT(self.Voxel,self.Fs) 
-        [self.maxtab, self.mintab ]= utils.peakdet(self.FFTVoxel,0.01)
+        self.update_voxel_data()
+        self.updateOSC()
         self._update_images()
         self.center.invalidate_and_redraw()
         self.right.invalidate_and_redraw()
@@ -692,8 +702,10 @@ class BrainFrame(wx.Frame):
         # Create data series to plot
         freqplotBig = Plot(self.plotdataVoxelFFT, resizable= 'hv', padding=20)
         freqplotBig.x_axis.title = "Frequency (Hz)"
-        freqplotBig.plot("FreqVoxel", color = 'lightblue', line_width=1.5, bgcolor="white", name = "Time")[0]        
+        freqplotBig.plot("FreqVoxel", color = 'lightblue', line_width=1.5, bgcolor="white", name = "Abs(Y)")[0]        
         freqplotBig.legend.visible = True
+        freqplotBig.plot("peaks", type = "scatter",color=tuple(COLOR_PALETTE[2]), 
+                line_width=1, bgcolor = "white", border_visible=True, name = "peaks")[0]
         self.freqPlotBig = freqplotBig 
 
         #self.time = time
@@ -806,6 +818,10 @@ class BrainFrame(wx.Frame):
         pdVoxel.set_data("time", aTime)
 
         pdVoxelFFT.set_data("FreqVoxel",self.FFTVoxel)
+        aFreq = num.zeros(self.frqs.shape)
+        aFreq[:] = num.nan
+        aFreq[list(self.maxtab[:,0])]= self.fftPeaks
+        pdVoxelFFT.set_data("peaks", aFreq)
 
 class run(wx.App):
     def __init__(self,  redirect=False,clargs=None):
