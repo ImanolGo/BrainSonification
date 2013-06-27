@@ -1,6 +1,6 @@
 
 
-from nifti import *
+import nibabel as nib
 import osc_send as sn
 import utils
 import numpy as num
@@ -264,14 +264,18 @@ class BrainFrame(wx.Frame):
         print "..."
         if os.path.exists(path):
             nii_files = sorted (glob.glob( os.path.join(path, '*.img')), key = str.lower)
-            nim = NiftiImage(nii_files[0])
+            #nim = NiftiImage(nii_files[0])
+            print nii_files[0]
+            img = nib.load(nii_files[0])
+            print img.shape
             self.num_figs = len(nii_files) #time axis
-            (self.len_z,self.len_x,self.len_y) = num.shape(nim.data) # 3D axis
+            (self.len_z,self.len_x,self.len_y) = img.shape # 3D axis
             self.Data  = num.zeros((self.num_figs,self.len_z,self.len_x,self.len_y)) # Data allocation of memory
 
             for i in range(self.num_figs):
-                nim = NiftiImage(nii_files[i])
-                self.Data [i,:,:,:] = nim.data #filling the data with every frame
+                #nim = NiftiImage(nii_files[i])
+                img = nib.load(nii_files[i])
+                self.Data [i,:,:,:] = img.get_data() #filling the data with every frame
                 print "Loading: " + nii_files[i]
 
             print "Brain data loaded..."
@@ -512,9 +516,9 @@ class BrainFrame(wx.Frame):
         data_path =  str(selected[0][0:ind+1])
         dialog.Destroy()
         self.init_data(data_path)
+        self.update_panel()
         self.update_voxel_data()
         self.updateOSC()
-        self.draw_plot()
 
     def draw_plot(self):
         self._create_plot_window()
