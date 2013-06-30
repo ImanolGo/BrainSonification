@@ -2,10 +2,14 @@
 
 import nibabel as nib
 import osc_send as sn
+
 import utils
 import numpy as num
 import wx
 import os, glob
+
+#from nipy.algorithms.utils.pca import pca
+from sklearn.decomposition import PCA
 
 # Enthought library imports
 from enthought.chaco.tools.cursor_tool import CursorTool, BaseCursorTool
@@ -100,8 +104,7 @@ class BrainFrame(wx.Frame):
         self.colorcube = Any
         self.num_figs = 10
         self.Data = 0
-        self.n= 50 # number of principal components
-        self.voxelsSonificationValue = num.zeros(self.n) #Initialization of voxel's array to sonify.
+        self.numPC = 50 # number of principal components
         self.volume_on = False
         self.previous_vol = 0
         self.best_voxels_ind = []
@@ -137,8 +140,8 @@ class BrainFrame(wx.Frame):
         self.CtrlSliceX  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=64)
         self.CtrlSliceY  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=64)
         self.CtrlSliceZ  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=36)
-        self.bestVoxelsText = wx.StaticText(self.pnl3, -1, 'Select nth principal component')
-        self.bestVoxelsCtrl  = wx.SpinCtrl(self.pnl3, -1, '1', min=1, max=self.n)
+        self.PCText = wx.StaticText(self.pnl3, -1, 'Select nth Principal Component')
+        self.PCCtrl  = wx.SpinCtrl(self.pnl3, -1, '1', min=1, max=self.numPC)
         self.VAText = wx.StaticText(self.pnl3, -1, 'Voxel Analysis')
         self.VoxelAnalysisTypes = ['Time','Frequency']
         self.VoxelAnalysisBox = wx.ComboBox(self.pnl3,-1 , choices=self.VoxelAnalysisTypes, 
@@ -259,6 +262,8 @@ class BrainFrame(wx.Frame):
 
     def init_data(self, path):
 
+        self.Data = []
+        self.PCA_data = []
         # Generate some data to plot:
         print "Loading brain data from " + path
         print "..."
@@ -270,12 +275,16 @@ class BrainFrame(wx.Frame):
             print img.shape
             self.num_figs = len(nii_files) #time axis
             (self.len_z,self.len_x,self.len_y) = img.shape # 3D axis
-            self.Data  = num.zeros((self.num_figs,self.len_z,self.len_x,self.len_y)) # Data allocation of memory
-
+            self.Data  = num.empty((self.num_figs,self.len_z,self.len_x,self.len_y)) # Data allocation of memory
+            #self.PCA_data = num.zeros((self.num_figs,self.len_z*self.len_x*self.len_y)) # Data allocation of memory
+            self.PCA_data = num.empty((self.len_z*self.len_x*self.len_y,self.num_figs)) # Data allocation of memory
             for i in range(self.num_figs):
                 #nim = NiftiImage(nii_files[i])
                 img = nib.load(nii_files[i])
                 self.Data [i,:,:,:] = img.get_data() #filling the data with every frame
+                #print img.get_data().ravel().shape()
+                #print num.ravel(img.get_data())
+                self.PCA_data [:,i] = num.ravel(img.get_data())
                 print "Loading: " + nii_files[i]
 
             print "Brain data loaded..."
@@ -284,8 +293,24 @@ class BrainFrame(wx.Frame):
             print '\nNo Brain data my friend...\n'
 
         
+        print self.PCA_data.shape
         self.max_data =  self.Data.max()
         print "Max Data value: ", self.max_data
+
+        min_value = 350
+        msk = num.all(self.PCA_data > min_value, axis=0)
+
+        print "Calculating PCA ..."
+        #self.res = pca(self.PCA_data, axis = 0, mask=msk, ncomp=9)
+        self.pca =  PCA(n_components=9, copy= False)
+        self.pca.fit(self.PCA_data)
+        print(self.pca.components_.shape) 
+        print(self.pca.explained_variance_ratio_) 
+        print "PCA done!"
+        """print self.Data.shape
+        print self.res['basis_vectors'].shape
+        print self.res['basis_projections'].shape
+        print self.res['pcnt_var'].shape"""
 
         self.pos_t = 0
         self.pos_x = int(self.len_x/2)
@@ -307,10 +332,10 @@ class BrainFrame(wx.Frame):
         [self.maxtab, self.mintab ]= utils.peakdet(self.FFTVoxel,0.01)
         self.fftPeaks = self.maxtab[:,1]
         self.frqsPeaks = self.frqs[list(self.maxtab[:,0])]
-        print "FTT Peaks: " 
+        """print "FTT Peaks: " 
         print self.fftPeaks 
         print "f(Hz): " 
-        print self.frqsPeaks
+        print self.frqsPeaks"""
 
     def update_panel(self):
         self.slider1.SetRange(0,self.num_figs) #set the new range of slider
@@ -485,15 +510,11 @@ class BrainFrame(wx.Frame):
             self.slider1Update(event)
         else:
             self.timer.Stop()
-            self.osc.send_best_voxels(num.zeros(self.n))
+            elf.osc.send_PC(num.zeros(self.numPC))
         
     def pauseClick(self, event):
         self.timer.Stop()
-        if (self.sSynthesisTechnique == 'Additive Synthesis'):
-             for i in range(self.SinesNumber*2):
-                self.Sines[i].stop()
-        else:  
-            self.osc.send_best_voxels(num.zeros(self.n))
+        self.osc.send_best_voxels(num.zeros(self.numPC))
             
     def OnExit(self, event):
         self.timer.Stop()
