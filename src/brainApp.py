@@ -105,6 +105,8 @@ class BrainFrame(wx.Frame):
         self.num_figs = 10
         self.Data = 0
         self.numPC = 50 # number of principal components
+        self.pcInd = 0
+        self.principalComponent = []
         self.volume_on = False
         self.previous_vol = 0
         self.best_voxels_ind = []
@@ -143,10 +145,6 @@ class BrainFrame(wx.Frame):
         self.PCText = wx.StaticText(self.pnl3, -1, 'Select nth Principal Component')
         self.PCCtrl  = wx.SpinCtrl(self.pnl3, -1, '1', min=1, max=self.numPC)
         self.VAText = wx.StaticText(self.pnl3, -1, 'Voxel Analysis')
-        self.VoxelAnalysisTypes = ['Time','Frequency']
-        self.VoxelAnalysisBox = wx.ComboBox(self.pnl3,-1 , choices=self.VoxelAnalysisTypes, 
-                        style=wx.CB_READONLY)
-        self.VoxelAnalysisBox.SetValue('Time')
        
         # create track counter
         self.trackCounter = wx.StaticText(self.pnl2, label=" 0 / 0")
@@ -187,15 +185,13 @@ class BrainFrame(wx.Frame):
         hbox2 = wx.BoxSizer(wx.HORIZONTAL)
         self.topsizer= wx.BoxSizer(wx.HORIZONTAL) # left controls, right image output
         # slider controls controls
+
         ctrlsizer= wx.BoxSizer(wx.VERTICAL)
-        ctrlsizer.Add(self.bestVoxelsText, 0, wx.ALIGN_CENTER, 5)
+        ctrlsizer.AddSpacer(30)
+        ctrlsizer.Add(self.PCText, 0, wx.ALIGN_CENTER, 5)
         ctrlsizer.AddSpacer(5)
-        ctrlsizer.Add(self.bestVoxelsCtrl,0,wx.ALIGN_CENTER)
-        ctrlsizer.AddSpacer(10)
-        ctrlsizer.Add(self.VAText, 0,wx.ALIGN_CENTER, 5)
-        ctrlsizer.AddSpacer(5)
-        ctrlsizer.Add(self.VoxelAnalysisBox,0,wx.ALIGN_CENTER) 
-        ctrlsizer.AddSpacer(20)
+        ctrlsizer.Add(self.PCCtrl,0,wx.ALIGN_CENTER)
+        ctrlsizer.AddSpacer(30)
        
         h1= wx.BoxSizer(wx.HORIZONTAL)
         h1.Add(self.TextSliceZ,0,wx.ALIGN_CENTER)
@@ -252,8 +248,7 @@ class BrainFrame(wx.Frame):
         self.CtrlSliceX.Bind(wx.EVT_SPINCTRL, self.move2SliceX)
         self.CtrlSliceZ.Bind(wx.EVT_SPINCTRL, self.move2SliceZ)
         self.CtrlSliceY.Bind(wx.EVT_SPINCTRL, self.move2SliceY)
-        self.bestVoxelsCtrl.Bind(wx.EVT_SPINCTRL, self.VoxelSelect)
-        self.VoxelAnalysisBox.Bind(wx.EVT_COMBOBOX, self.VoxelAnalysisChoose) 
+        self.PCCtrl.Bind(wx.EVT_SPINCTRL, self.PC_Select)
         self.prev.Bind(wx.EVT_BUTTON, self.prevClick)
         self.next.Bind(wx.EVT_BUTTON, self.nextClick)
         self.play.Bind(wx.EVT_BUTTON, self.playClick)
@@ -264,6 +259,7 @@ class BrainFrame(wx.Frame):
 
         self.Data = []
         self.PCA_data = []
+        min_value = 350
         # Generate some data to plot:
         print "Loading brain data from " + path
         print "..."
@@ -276,7 +272,14 @@ class BrainFrame(wx.Frame):
             self.num_figs = len(nii_files) #time axis
             (self.len_z,self.len_x,self.len_y) = img.shape # 3D axis
             self.Data  = num.empty((self.num_figs,self.len_z,self.len_x,self.len_y)) # Data allocation of memory
-            #self.PCA_data = num.zeros((self.num_figs,self.len_z*self.len_x*self.len_y)) # Data allocation of memory
+            
+            flatImg = num.ravel(img.get_data())
+            print flatImg.shape
+            mskInd = num.all(flatImg > min_value, axis = 0)
+            print mskInd
+            msk = flatImg[mskInd]
+            print msk.shape
+            # IMPORTANT y[self.tasks[i]]= self.Voxel[self.tasks[i]].copy()
             self.PCA_data = num.empty((self.len_z*self.len_x*self.len_y,self.num_figs)) # Data allocation of memory
             for i in range(self.num_figs):
                 #nim = NiftiImage(nii_files[i])
@@ -297,15 +300,16 @@ class BrainFrame(wx.Frame):
         self.max_data =  self.Data.max()
         print "Max Data value: ", self.max_data
 
-        min_value = 350
-        msk = num.all(self.PCA_data > min_value, axis=0)
+        
+        #msk = num.all(self.PCA_data > min_value, axis=0)
 
         print "Calculating PCA ..."
         #self.res = pca(self.PCA_data, axis = 0, mask=msk, ncomp=9)
-        self.pca =  PCA(n_components=9, copy= False)
+        self.pca =  PCA(n_components=self.numPC, copy= False)
         self.pca.fit(self.PCA_data)
         print(self.pca.components_.shape) 
         print(self.pca.explained_variance_ratio_) 
+        print self.principalComponent
         print "PCA done!"
         """print self.Data.shape
         print self.res['basis_vectors'].shape
@@ -323,19 +327,28 @@ class BrainFrame(wx.Frame):
         self.slice_y = int(self.len_y/2)
         self.slice_z = int(self.len_z/2)
         self.vals = self.Data[self.pos_t,:,:,:]
+        self.principalComponent = self.pca.components_[self.pcInd]
 
+
+    def PC_Select(self,event):
+        self.pcInd = self.PCCtrl.GetValue() - 1
+        self.principalComponent = self.pca.components_[self.pcInd]
+        print self.principalComponent
+        self.updateSlices()
 
     def update_voxel_data(self):
         self.vals = self.Data[self.pos_t,:,:,:]
         self.Voxel = self.Data[:,self.slice_z,self.slice_x,self.slice_y]
+        self.VoxelZeroPad = num.zeros(32048)
+        self.VoxelZeroPad[0:self.num_figs] = self.Voxel
         [self.FFTVoxel,self.frqs] = utils.calcFFT(self.Voxel,self.Fs) 
         [self.maxtab, self.mintab ]= utils.peakdet(self.FFTVoxel,0.01)
         self.fftPeaks = self.maxtab[:,1]
         self.frqsPeaks = self.frqs[list(self.maxtab[:,0])]
-        """print "FTT Peaks: " 
+        print "FTT Peaks: " 
         print self.fftPeaks 
         print "f(Hz): " 
-        print self.frqsPeaks"""
+        print self.frqsPeaks
 
     def update_panel(self):
         self.slider1.SetRange(0,self.num_figs) #set the new range of slider
@@ -347,13 +360,6 @@ class BrainFrame(wx.Frame):
         self.CtrlSliceY.SetValue(self.slice_y) 
         self.CtrlSliceZ.SetRange(0,self.len_z) 
         self.CtrlSliceZ.SetValue(self.slice_z) 
-
-    def VoxelAnalysisChoose(self,event):
-        item = event.GetSelection()
-        if (self.VoxelAnalysisTypes[item] == 'Time'): 
-            print 'Time'
-        elif (self.VoxelAnalysisTypes[item] == 'Frequency'): 
-            print 'Frequency'
         
     def enter_axes(self,event):        
         i = 0
@@ -396,6 +402,7 @@ class BrainFrame(wx.Frame):
         self.center.invalidate_and_redraw()
         self.right.invalidate_and_redraw()
         self.bottom.invalidate_and_redraw()
+        self._update_images()
         self.updateOSC()
 
     def updateOSC(self):
@@ -639,6 +646,7 @@ class BrainFrame(wx.Frame):
         self.plotdataVoxel = ArrayPlotData()
         self.plotdataSlices = ArrayPlotData()
         self.plotdataVoxelFFT = ArrayPlotData()
+        self.plotdataPC = ArrayPlotData()
         self._update_images()
         
          # Top Left plot
@@ -735,6 +743,15 @@ class BrainFrame(wx.Frame):
                 line_width=1, bgcolor = "white", border_visible=True, name = "peaks")[0]
         self.freqPlotBig = freqplotBig 
 
+         # Create data series to plot
+        PCplotBig = Plot(self.plotdataPC, resizable= 'hv', padding=20)
+        PCplotBig.x_axis.title = "Frames"
+        PCplotBig.plot("Principal Component", color = 'lightblue', line_width=1.5, bgcolor="white", name = "Principal Component")[0]        
+        PCplotBig.legend.visible = True
+        PCplotBig.plot("time", type = "scatter",color=tuple(COLOR_PALETTE[2]), 
+                line_width=1, bgcolor = "white", border_visible=True, name = "time")[0]
+        self.PCplotBig = PCplotBig 
+
         #self.time = time
         # Create a GridContainer to hold all of our plots
         container = GridContainer(padding=10, fill_padding=True,
@@ -747,6 +764,9 @@ class BrainFrame(wx.Frame):
         containerFreq = GridContainer(padding=10, fill_padding=True,
                               bgcolor="white", use_backbuffer=True,
                               shape=(1,1), spacing=(5,5))
+        containerPC = GridContainer(padding=10, fill_padding=True,
+                              bgcolor="white", use_backbuffer=True,
+                              shape=(1,1), spacing=(5,5))
 
         
         container.add(centerplot)
@@ -755,6 +775,7 @@ class BrainFrame(wx.Frame):
         container.add(timeplot)
         containerTime.add(timeplotBig)
         containerFreq.add(freqplotBig)
+        containerPC.add(PCplotBig)
         
         """container = GridContainer(padding=10, fill_padding=True,
                               bgcolor="white", use_backbuffer=True,
@@ -770,6 +791,7 @@ class BrainFrame(wx.Frame):
         self.window =  Window(self.nb, -1, component=container)
         self.windowTime =  Window(self.nb, -1, component=containerTime)
         self.windowFreq =  Window(self.nb, -1, component=containerFreq)
+        self.windowPC =  Window(self.nb, -1, component=containerPC)
         self.sizer.Detach(self.topsizer)
         self.sizer.Detach(self.pnl2)
         self.topsizer.Clear()
@@ -777,6 +799,7 @@ class BrainFrame(wx.Frame):
         self.nb.AddPage(self.window.control, "fMRI Slices")
         self.nb.AddPage(self.windowTime.control, "Time Voxel")
         self.nb.AddPage(self.windowFreq.control, "Frequency Voxel")
+        self.nb.AddPage(self.windowPC.control, "Principal Component")
         self.topsizer.Add(self.nb, 1, wx.EXPAND) 
         self.sizer.Add(self.topsizer, 1, wx.EXPAND)
         self.sizer.Add(self.pnl2, flag=wx.EXPAND | wx.BOTTOM | wx.TOP, border=10)
@@ -826,6 +849,7 @@ class BrainFrame(wx.Frame):
         pd = self.plotdata
         pdVoxel = self.plotdataVoxel
         pdVoxelFFT = self.plotdataVoxelFFT
+        pdPC = self.plotdataPC
         # These are transposed because img_plot() expects its data to be in 
         # row-major order
         pd.set_data("yz", cube[:, self.slice_x, :])
@@ -833,16 +857,16 @@ class BrainFrame(wx.Frame):
         pd.set_data("xy", cube[self.slice_z,:,:])
         
         pdVoxel.set_data("TimeVoxel", self.Voxel)
-        """for i in range(len(self.tasks)):
-            y = num.zeros(self.num_figs)
-            y[:] = num.nan
-            y[self.tasks[i]]= self.Voxel[self.tasks[i]].copy()
-            pdVoxel.set_data("task" + str(i), y)"""
-        
         aTime = num.zeros(self.num_figs)
         aTime[:] = num.nan
         aTime[self.pos_t]= self.Voxel[self.pos_t]
         pdVoxel.set_data("time", aTime)
+
+        pcTime = num.zeros(self.num_figs)
+        pcTime[:] = num.nan
+        pcTime[self.pos_t]= self.principalComponent[self.pos_t]
+        pdPC.set_data("Principal Component",self.principalComponent)
+        pdPC.set_data("time", pcTime)
 
         pdVoxelFFT.set_data("FreqVoxel",self.FFTVoxel)
         aFreq = num.zeros(self.frqs.shape)
