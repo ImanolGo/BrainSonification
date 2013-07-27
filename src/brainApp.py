@@ -5,6 +5,7 @@ import osc_send as sn
 
 import utils
 import numpy as num
+import scipy as sp
 import wx
 import os, glob
 
@@ -122,13 +123,9 @@ class BrainFrame(wx.Frame):
         self.fftPeaks = num.zeros(self.num_figs)
         self.maxtab = num.zeros(shape=(self.num_figs,2))
 
-        self.init_data('../data/s03_epi_snr01_xxx/')
         self.init_panel()
-        self.update_panel()
-        self.update_voxel_data()
-        self.updateOSC()
-        self.draw_plot()
-
+        self.init_data('../data/testData/')
+       
     def init_panel(self):
                 # initialize menubar
         toolbar = self.CreateToolBar()
@@ -139,9 +136,9 @@ class BrainFrame(wx.Frame):
         self.TextSliceX = wx.StaticText(self.pnl3, -1, 'X: ')
         self.TextSliceY = wx.StaticText(self.pnl3, -1, 'Y: ')
         self.TextSliceZ = wx.StaticText(self.pnl3, -1, 'Z: ')
-        self.CtrlSliceX  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=64)
-        self.CtrlSliceY  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=64)
-        self.CtrlSliceZ  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=36)
+        self.CtrlSliceX  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=42)
+        self.CtrlSliceY  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=51)
+        self.CtrlSliceZ  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=28)
         self.PCText = wx.StaticText(self.pnl3, -1, 'Select nth Principal Component')
         self.PCCtrl  = wx.SpinCtrl(self.pnl3, -1, '1', min=1, max=self.numPC)
         self.VAText = wx.StaticText(self.pnl3, -1, 'Voxel Analysis')
@@ -255,11 +252,24 @@ class BrainFrame(wx.Frame):
         self.pause.Bind(wx.EVT_BUTTON, self.pauseClick)
         self.volume.Bind(wx.EVT_BUTTON, self.volumeClick)
 
+    # Find a better way to do it
+    def hacky_IndexFinder(self, dataIn):
+        dataInFlat = num.ravel(dataIn)
+        inds = []
+        print dataInFlat.shape
+        for i in range(dataInFlat.shape[0]):
+            if(dataInFlat[i]>500):
+                inds.append(i)
+        
+        indsArray = num.array(inds)
+        print indsArray.shape
+        return indsArray
+
     def init_data(self, path):
 
         self.Data = []
         self.PCA_data = []
-        min_value = 350
+        min_value = 500
         # Generate some data to plot:
         print "Loading brain data from " + path
         print "..."
@@ -270,24 +280,25 @@ class BrainFrame(wx.Frame):
             img = nib.load(nii_files[0])
             print img.shape
             self.num_figs = len(nii_files) #time axis
-            (self.len_z,self.len_x,self.len_y) = img.shape # 3D axis
-            self.Data  = num.empty((self.num_figs,self.len_z,self.len_x,self.len_y)) # Data allocation of memory
+            (self.len_x,self.len_y,self.len_z) = img.shape # 3D axis
+            self.Data  = num.empty((self.num_figs,self.len_x,self.len_y,self.len_z)) # Data allocation of memory
+
+            print "Z: ", self.len_z
+            print "X: " , self.len_x
+            print "Y: " , self.len_y
             
-            flatImg = num.ravel(img.get_data())
-            print flatImg.shape
-            mskInd = num.all(flatImg > min_value, axis = 0)
-            print mskInd
-            msk = flatImg[mskInd]
-            print msk.shape
+            inds = self.hacky_IndexFinder(img.get_data())
+           
             # IMPORTANT y[self.tasks[i]]= self.Voxel[self.tasks[i]].copy()
-            self.PCA_data = num.empty((self.len_z*self.len_x*self.len_y,self.num_figs)) # Data allocation of memory
+            #self.PCA_data = num.empty((self.len_z*self.len_x*self.len_y,self.num_figs)) # Data allocation of memory
+            self.PCA_data = num.empty((inds.shape[0],self.num_figs)) # Data allocation of memory
             for i in range(self.num_figs):
-                #nim = NiftiImage(nii_files[i])
                 img = nib.load(nii_files[i])
                 self.Data [i,:,:,:] = img.get_data() #filling the data with every frame
-                #print img.get_data().ravel().shape()
-                #print num.ravel(img.get_data())
-                self.PCA_data [:,i] = num.ravel(img.get_data())
+                #self.PCA_data [:,i] = num.ravel(img.get_data())
+                imgFlat =  num.ravel(img.get_data())
+                self.PCA_data [:,i] = imgFlat[inds]
+                print self.PCA_data [:,i]
                 print "Loading: " + nii_files[i]
 
             print "Brain data loaded..."
@@ -329,6 +340,11 @@ class BrainFrame(wx.Frame):
         self.vals = self.Data[self.pos_t,:,:,:]
         self.principalComponent = self.pca.components_[self.pcInd]
 
+        self.update_panel()
+        self.update_voxel_data()
+        self.updateOSC()
+        self.draw_plot()
+
 
     def PC_Select(self,event):
         self.pcInd = self.PCCtrl.GetValue() - 1
@@ -338,27 +354,27 @@ class BrainFrame(wx.Frame):
 
     def update_voxel_data(self):
         self.vals = self.Data[self.pos_t,:,:,:]
-        self.Voxel = self.Data[:,self.slice_z,self.slice_x,self.slice_y]
+        self.Voxel = self.Data[:,self.slice_x,self.slice_y,self.slice_z]
         self.VoxelZeroPad = num.zeros(32048)
         self.VoxelZeroPad[0:self.num_figs] = self.Voxel
         [self.FFTVoxel,self.frqs] = utils.calcFFT(self.Voxel,self.Fs) 
         [self.maxtab, self.mintab ]= utils.peakdet(self.FFTVoxel,0.01)
         self.fftPeaks = self.maxtab[:,1]
         self.frqsPeaks = self.frqs[list(self.maxtab[:,0])]
-        print "FTT Peaks: " 
-        print self.fftPeaks 
-        print "f(Hz): " 
-        print self.frqsPeaks
+        # print "FTT Peaks: " 
+        # print self.fftPeaks 
+        # print "f(Hz): " 
+        # print self.frqsPeaks
 
     def update_panel(self):
         self.slider1.SetRange(0,self.num_figs) #set the new range of slider
         self.slider1.SetValue(0)
         self.trackCounter.SetLabel(" 0 / " + str(self.num_figs)) 
-        self.CtrlSliceX.SetRange(0,self.len_x) 
+        self.CtrlSliceX.SetRange(0,self.len_x-1) 
         self.CtrlSliceX.SetValue(self.slice_x) 
-        self.CtrlSliceY.SetRange(0,self.len_y) 
+        self.CtrlSliceY.SetRange(0,self.len_y-1) 
         self.CtrlSliceY.SetValue(self.slice_y) 
-        self.CtrlSliceZ.SetRange(0,self.len_z) 
+        self.CtrlSliceZ.SetRange(0,self.len_z-1) 
         self.CtrlSliceZ.SetValue(self.slice_z) 
         
     def enter_axes(self,event):        
@@ -372,17 +388,18 @@ class BrainFrame(wx.Frame):
     def onclick(self,event):
         print 'button=%d, x=%d, y=%d, xdata=%f, ydata=%f'%(
             event.button, event.x, event.y, event.xdata, event.ydata)
+        print "onclick"
         if self.subplot_num ==0: #x-y plane
-            self.pos_x = int(event.xdata)
-            self.pos_y = int(event.ydata)
+            self.pos_x = int(event.ydata)
+            self.pos_y = int(event.xdata)
             self.draw_plot()
         elif self.subplot_num ==2: #x-z plane
-            self.pos_x = int(event.xdata) #not sure about that
-            self.pos_z = int(event.ydata) #not sure about that
+            self.pos_x = int(event.ydata) #not sure about that
+            self.pos_z = int(event.xdata) #not sure about that
             self.draw_plot()
         elif self.subplot_num ==4: #y-z plane
-            self.pos_y = int(event.xdata) #not sure about that
-            self.pos_z = int(event.ydata) #not sure about that
+            self.pos_y = int(event.ydata) #not sure about that
+            self.pos_z = int(event.xdata) #not sure about that
             self.draw_plot()
 
     def move2SliceX(self,event):
@@ -428,7 +445,7 @@ class BrainFrame(wx.Frame):
         self.pos_t = self.slider1.GetValue() 
         self.trackCounter.SetLabel(" " + str(self.pos_t) + " / " + str(self.num_figs))      
         self.vals = self.Data[self.pos_t,:,:,:]
-        string= "Voxel Energy: %.2f" % self.Data[self.pos_t,self.slice_z,self.slice_x,self.slice_y]
+        string= "Voxel Energy: %.2f" % self.Data[self.pos_t,self.slice_x,self.slice_y,self.slice_z]
         self.TextVoxelEnergy.SetLabel(string)
         self._update_model()
         self._update_images()
@@ -589,7 +606,7 @@ class BrainFrame(wx.Frame):
             self.cursorXY.current_position = self.slice_y , self.slice_x
             self.cursorYZ.current_position = self.slice_y , self.slice_z
             self.cursorXZ.current_position = self.slice_x , self.slice_z
-            string= "Voxel Energy: %.2f" % self.Data[self.pos_t,self.slice_z,self.slice_x,self.slice_y]
+            string= "Voxel Energy: %.2f" % self.Data[self.pos_t,self.slice_x,self.slice_y,self.slice_z]
             self.TextVoxelEnergy.SetLabel(string)
             self.update_voxel_data()
             self.updateOSC()
@@ -622,7 +639,7 @@ class BrainFrame(wx.Frame):
         self.CtrlSliceX.SetValue(self.slice_x) 
         self.CtrlSliceZ.SetValue(self.slice_z)
         self.CtrlSliceY.SetValue(self.slice_y)
-        string= "Voxel Energy: %.2f" % self.Data[self.pos_t,self.slice_z,self.slice_x,self.slice_y]
+        string= "Voxel Energy: %.2f" % self.Data[self.pos_t,self.slice_x,self.slice_y,self.slice_z]
         self.TextVoxelEnergy.SetLabel(string)
         self.update_voxel_data()
         self.updateOSC()
@@ -852,9 +869,9 @@ class BrainFrame(wx.Frame):
         pdPC = self.plotdataPC
         # These are transposed because img_plot() expects its data to be in 
         # row-major order
-        pd.set_data("yz", cube[:, self.slice_x, :])
-        pd.set_data("xz", cube[:, :, self.slice_y])
-        pd.set_data("xy", cube[self.slice_z,:,:])
+        pd.set_data("yz", sp.swapaxes(cube[self.slice_x, :, :],0,1))
+        pd.set_data("xz", sp.swapaxes(cube[:, self.slice_y, :],0,1))
+        pd.set_data("xy", cube[:,:,self.slice_z])
         
         pdVoxel.set_data("TimeVoxel", self.Voxel)
         aTime = num.zeros(self.num_figs)
