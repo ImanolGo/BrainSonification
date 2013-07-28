@@ -2,6 +2,7 @@
 
 import nibabel as nib
 import osc_send as sn
+import fMRI_analysis as fa
 
 import utils
 import numpy as num
@@ -9,8 +10,7 @@ import scipy as sp
 import wx
 import os, glob
 
-#from nipy.algorithms.utils.pca import pca
-from sklearn.decomposition import PCA
+import cPickle as pickle
 
 # Enthought library imports
 from enthought.chaco.tools.cursor_tool import CursorTool, BaseCursorTool
@@ -105,7 +105,8 @@ class BrainFrame(wx.Frame):
         self.colorcube = Any
         self.num_figs = 10
         self.Data = 0
-        self.numPC = 50 # number of principal components
+        self.numPC = 100 # number of principal components
+        self.numANOVA_voxels = 100 # number of ANOVA analysis voxels
         self.pcInd = 0
         self.principalComponent = []
         self.volume_on = False
@@ -113,8 +114,8 @@ class BrainFrame(wx.Frame):
         self.best_voxels_ind = []
         self.portNum = 9001
         self.osc = sn.osc_send(self.portNum)
-        self.T = 2 #The sample period 
-        self.Fs = 1.0/self.T #The sample frequency
+        self.TR = 2 #The sample period 
+        self.Fs = 1.0/self.TR #The sample frequency
         self.Fs = 44100 #The sample frequency
         self.cmap = Trait(gmt_drywet, Callable) #gmt_drywet,jet
         self.Voxel = num.zeros(self.num_figs)
@@ -122,16 +123,64 @@ class BrainFrame(wx.Frame):
         self.frqs = num.zeros(self.num_figs)
         self.fftPeaks = num.zeros(self.num_figs)
         self.maxtab = num.zeros(shape=(self.num_figs,2))
+        self.path = '../data/exp1-1/'
+
+        self.restTime = 30 # Pause time in seconds
+        self.verbalCueTime = 8 # Verbal cue time in seconds
+        self.taskTime = 30 # task's time in seconds
+        self.numTaskEpochs = 6 # Number of task epochs pro run
+        self.numRuns = 2 # Number of runs pro subject and experiment
+        self.numTasks = 3 # Number of tasks to attend to
 
         self.init_panel()
-        self.init_data('../data/testData/')
+        self.init_data()
+        self.init_experiment()
+
+        self.update_panel()
+        self.update_voxel_data()
+        self.updateOSC()
+        self.draw_plot()
+
+    def init_experiment(self):
+    
+        fMRI = fa.fMRI_analysis() 
+        self.runs = []
+        self.runs.append([2,3,4,3,4,2]) #First run
+        self.runs.append([2,4,3,4,3,2]) #Second run
+        self.timing = []
+
+        for i in range(self.numRuns):
+            for j in range(self.numTaskEpochs):
+                n = self.restTime/self.TR # number of whole 3D brains within the rest Period
+                for k in range(n):
+                    self.timing.append(0)
+                n = self.verbalCueTime/self.TR # number of whole 3D brains within the verbal cue time
+                for key in range(n):
+                    self.timing.append(1)
+                n = self.taskTime/self.TR # number of whole 3D brains within the task time
+                for k in range(n):
+                    self.timing.append(self.runs[i][j])
+
+        try:
+            fi = open(self.path + "selectedFeatures.dat", 'r')
+        except IOError:
+            #No such file
+            (self.ANOVA_ind, self.pca) = fMRI.selectFeatures(self.Data,self.timing)
+        else:
+            self.ANOVA_ind = pickle.load(fi)
+            self.pca= pickle.load(fi)
+            fi.close()
+
+        self.principalComponent = self.pca.components_[self.pcInd]
        
     def init_panel(self):
                 # initialize menubar
         toolbar = self.CreateToolBar()
        # toolbar.AddLabelTool(wx.ID_EXIT, '', wx.Bitmap('icons/quit.png'))
-        toolbar.AddLabelTool(wx.ID_OPEN, '', wx.Bitmap('../icons/Yellow_open.png'))
+        #toolbar.AddLabelTool(wx.ID_OPEN, '', wx.Bitmap('../icons/Yellow_open.png'))
         toolbar.Realize()
+        self.timingNames = ['Rest Period','Verbal Cue','Listen','Attend Vibes','Attend Strings']
+
         self.TextVoxelEnergy = wx.StaticText(self.pnl3, -1, 'Voxel Energy: 0.0' )
         self.TextSliceX = wx.StaticText(self.pnl3, -1, 'X: ')
         self.TextSliceY = wx.StaticText(self.pnl3, -1, 'Y: ')
@@ -139,15 +188,18 @@ class BrainFrame(wx.Frame):
         self.CtrlSliceX  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=42)
         self.CtrlSliceY  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=51)
         self.CtrlSliceZ  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=28)
+        self.ANOVAText = wx.StaticText(self.pnl3, -1, 'Select ANOVA Voxel')
+        self.ANOVACtrl  = wx.SpinCtrl(self.pnl3, -1, '1', min=1, max=self.numANOVA_voxels)
+        self.TextTiming = wx.StaticText(self.pnl3, -1, self.timingNames[0])
         self.PCText = wx.StaticText(self.pnl3, -1, 'Select nth Principal Component')
         self.PCCtrl  = wx.SpinCtrl(self.pnl3, -1, '1', min=1, max=self.numPC)
-        self.VAText = wx.StaticText(self.pnl3, -1, 'Voxel Analysis')
+    
        
         # create track counter
         self.trackCounter = wx.StaticText(self.pnl2, label=" 0 / 0")
 
         self.Bind(wx.EVT_TOOL, self.OnExit, id=wx.ID_EXIT)
-        self.Bind(wx.EVT_TOOL, self.OnOpen, id=wx.ID_OPEN)
+        #self.Bind(wx.EVT_TOOL, self.OnOpen, id=wx.ID_OPEN)
         self.Bind(wx.EVT_TIMER, self.OnTimer)
 
         # initialize slider
@@ -184,6 +236,12 @@ class BrainFrame(wx.Frame):
         # slider controls controls
 
         ctrlsizer= wx.BoxSizer(wx.VERTICAL)
+        ctrlsizer.AddSpacer(30)
+        ctrlsizer.Add(self.ANOVAText, 0, wx.ALIGN_CENTER, 5)
+        ctrlsizer.AddSpacer(5)
+        ctrlsizer.Add(self.ANOVACtrl, 0, wx.ALIGN_CENTER, 5)
+        ctrlsizer.AddSpacer(10)
+        ctrlsizer.Add(self.TextTiming, 0, wx.ALIGN_CENTER, 5)
         ctrlsizer.AddSpacer(30)
         ctrlsizer.Add(self.PCText, 0, wx.ALIGN_CENTER, 5)
         ctrlsizer.AddSpacer(5)
@@ -252,80 +310,54 @@ class BrainFrame(wx.Frame):
         self.pause.Bind(wx.EVT_BUTTON, self.pauseClick)
         self.volume.Bind(wx.EVT_BUTTON, self.volumeClick)
 
-    # Find a better way to do it
-    def hacky_IndexFinder(self, dataIn):
-        dataInFlat = num.ravel(dataIn)
-        inds = []
-        print dataInFlat.shape
-        for i in range(dataInFlat.shape[0]):
-            if(dataInFlat[i]>500):
-                inds.append(i)
-        
-        indsArray = num.array(inds)
-        print indsArray.shape
-        return indsArray
-
-    def init_data(self, path):
+    def init_data(self):
 
         self.Data = []
         self.PCA_data = []
         min_value = 500
-        # Generate some data to plot:
-        print "Loading brain data from " + path
-        print "..."
-        if os.path.exists(path):
-            nii_files = sorted (glob.glob( os.path.join(path, '*.img')), key = str.lower)
-            #nim = NiftiImage(nii_files[0])
-            print nii_files[0]
-            img = nib.load(nii_files[0])
-            print img.shape
-            self.num_figs = len(nii_files) #time axis
-            (self.len_x,self.len_y,self.len_z) = img.shape # 3D axis
-            self.Data  = num.empty((self.num_figs,self.len_x,self.len_y,self.len_z)) # Data allocation of memory
 
-            print "Z: ", self.len_z
-            print "X: " , self.len_x
-            print "Y: " , self.len_y
-            
-            inds = self.hacky_IndexFinder(img.get_data())
-           
-            # IMPORTANT y[self.tasks[i]]= self.Voxel[self.tasks[i]].copy()
-            #self.PCA_data = num.empty((self.len_z*self.len_x*self.len_y,self.num_figs)) # Data allocation of memory
-            self.PCA_data = num.empty((inds.shape[0],self.num_figs)) # Data allocation of memory
-            for i in range(self.num_figs):
+        self.Data = []
+        self.num_figs = 0
+          # Generate some data to plot:
+        for n in range(self.numRuns):
+            pathRun = self.path + "snr" + str(n+1) + "/"
+            print "Loading brain data from " + pathRun
+            print "..."
+            if os.path.exists(pathRun):
+                nii_files = sorted (glob.glob( os.path.join(pathRun, '*.img')), key = str.lower)
+                self.num_figs += len(nii_files) #time axis
+                if(n==self.numRuns-1):
+                    img = nib.load(nii_files[0])
+                    print img.shape
+                    (self.len_x,self.len_y,self.len_z) = img.shape # 3D axis
+                    self.Data  = num.empty((self.num_figs,self.len_x,self.len_y,self.len_z)) # Data allocation of memory
+                    print "Z: ", self.len_z
+                    print "X: " , self.len_x
+                    print "Y: " , self.len_y
+            else:
+                print '\nNo Brain data my friend...\n'
+                return
+
+        prevFigures = 0
+        for n in range(self.numRuns):
+            pathRun = self.path + "snr" + str(n+1) + "/"
+            print "Loading brain data from " + pathRun
+            print "..."
+            nii_files = sorted (glob.glob( os.path.join(pathRun, '*.img')), key = str.lower)
+
+            for i in range(len(nii_files)):
                 img = nib.load(nii_files[i])
-                self.Data [i,:,:,:] = img.get_data() #filling the data with every frame
-                #self.PCA_data [:,i] = num.ravel(img.get_data())
-                imgFlat =  num.ravel(img.get_data())
-                self.PCA_data [:,i] = imgFlat[inds]
-                print self.PCA_data [:,i]
+                self.Data [prevFigures + i,:,:,:] = img.get_data() #filling the data with every frame
                 print "Loading: " + nii_files[i]
+                # imgFlat =  num.ravel(img.get_data())
+                # self.PCA_data [:,i] = imgFlat[inds]
 
-            print "Brain data loaded..."
-
-        else:
-            print '\nNo Brain data my friend...\n'
-
-        
-        print self.PCA_data.shape
+            prevFigures +=len(nii_files)
+            
+        print "Brain data loaded..."
+        print self.Data.shape
         self.max_data =  self.Data.max()
         print "Max Data value: ", self.max_data
-
-        
-        #msk = num.all(self.PCA_data > min_value, axis=0)
-
-        print "Calculating PCA ..."
-        #self.res = pca(self.PCA_data, axis = 0, mask=msk, ncomp=9)
-        self.pca =  PCA(n_components=self.numPC, copy= False)
-        self.pca.fit(self.PCA_data)
-        print(self.pca.components_.shape) 
-        print(self.pca.explained_variance_ratio_) 
-        print self.principalComponent
-        print "PCA done!"
-        """print self.Data.shape
-        print self.res['basis_vectors'].shape
-        print self.res['basis_projections'].shape
-        print self.res['pcnt_var'].shape"""
 
         self.pos_t = 0
         self.pos_x = int(self.len_x/2)
@@ -338,18 +370,11 @@ class BrainFrame(wx.Frame):
         self.slice_y = int(self.len_y/2)
         self.slice_z = int(self.len_z/2)
         self.vals = self.Data[self.pos_t,:,:,:]
-        self.principalComponent = self.pca.components_[self.pcInd]
-
-        self.update_panel()
-        self.update_voxel_data()
-        self.updateOSC()
-        self.draw_plot()
-
 
     def PC_Select(self,event):
         self.pcInd = self.PCCtrl.GetValue() - 1
         self.principalComponent = self.pca.components_[self.pcInd]
-        print self.principalComponent
+        #print self.principalComponent
         self.updateSlices()
 
     def update_voxel_data(self):
@@ -545,25 +570,25 @@ class BrainFrame(wx.Frame):
         self.Close()
         return 0
 
-    def OnOpen(self, event):
-        self.panel = wx.Panel(self, -1)
-        filters = 'NIFTI images (*.img)|*.img' 
-        dialog = wx.FileDialog ( self.panel, message = 'Choose a NIFTI image', wildcard = filters, style = wx.OPEN | wx.MULTIPLE )
+    # def OnOpen(self, event):
+    #     self.panel = wx.Panel(self, -1)
+    #     filters = 'NIFTI images (*.img)|*.img' 
+    #     dialog = wx.FileDialog ( self.panel, message = 'Choose a NIFTI image', wildcard = filters, style = wx.OPEN | wx.MULTIPLE )
         
-        if dialog.ShowModal() == wx.ID_OK:
-           selected = dialog.GetPaths()
-           for selection in selected:
-              print 'Selected:', selection
-        else:
-           print 'Nothing was selected.'
+    #     if dialog.ShowModal() == wx.ID_OK:
+    #        selected = dialog.GetPaths()
+    #        for selection in selected:
+    #           print 'Selected:', selection
+    #     else:
+    #        print 'Nothing was selected.'
         
-        ind = selected[0].rfind('/')
-        data_path =  str(selected[0][0:ind+1])
-        dialog.Destroy()
-        self.init_data(data_path)
-        self.update_panel()
-        self.update_voxel_data()
-        self.updateOSC()
+    #     ind = selected[0].rfind('/')
+    #     data_path =  str(selected[0][0:ind+1])
+    #     dialog.Destroy()
+    #     self.init_data(data_path)
+    #     self.update_panel()
+    #     self.update_voxel_data()
+    #     self.updateOSC()
 
     def draw_plot(self):
         self._create_plot_window()
