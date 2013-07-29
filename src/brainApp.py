@@ -165,14 +165,38 @@ class BrainFrame(wx.Frame):
             fi = open(self.path + "selectedFeatures.dat", 'r')
         except IOError:
             #No such file
-            (self.ANOVA_ind, self.pca) = fMRI.selectFeatures(self.Data,self.timing)
+            (self.ANOVA_ind, self.pca, self.tasks) = fMRI.selectFeatures(self.Data,self.timing)
         else:
             self.ANOVA_ind = pickle.load(fi)
-            self.pca= pickle.load(fi)
+            self.pca = pickle.load(fi)
+            self.tasks = pickle.load(fi)
             fi.close()
 
+        self.writeVoxelCoordinates()
+    
+    def writeVoxelCoordinates(self):
+
+        fi = open(self.path + "BestVoxelsCoordinates.txt", 'w')  
+        fi.write("x y z\n")    
+        self.ANOVAvoxels = []
+        for n in range(self.numANOVA_voxels):
+            ind  = self.ANOVA_ind[n] #takes the nth best voxel
+            j = ind%self.len_y #y axis
+            rest = ind/self.len_y 
+            i = rest%self.len_x #x axis
+            k = rest/self.len_x #z axis
+            self.ANOVAvoxels.append(self.Data[:,i,j,k])
+
+            line = "%.4f" % ((i-(self.len_x-1)*0.5)/(self.len_x-1)*0.5)
+            line += " %.4f" % ((j-(self.len_y-1)*0.5)/(self.len_y-1)*0.5)
+            line += " %.4f" % ((float(k)/(self.len_z-1)))
+            line+='\n'
+            fi.write(line) 
+
+        self.ANOVAvoxels = num.array(self.ANOVAvoxels)
+        print self.ANOVAvoxels.shape
         self.principalComponent = self.pca.components_[self.pcInd]
-       
+
     def init_panel(self):
                 # initialize menubar
         toolbar = self.CreateToolBar()
@@ -240,8 +264,6 @@ class BrainFrame(wx.Frame):
         ctrlsizer.Add(self.ANOVAText, 0, wx.ALIGN_CENTER, 5)
         ctrlsizer.AddSpacer(5)
         ctrlsizer.Add(self.ANOVACtrl, 0, wx.ALIGN_CENTER, 5)
-        ctrlsizer.AddSpacer(10)
-        ctrlsizer.Add(self.TextTiming, 0, wx.ALIGN_CENTER, 5)
         ctrlsizer.AddSpacer(30)
         ctrlsizer.Add(self.PCText, 0, wx.ALIGN_CENTER, 5)
         ctrlsizer.AddSpacer(5)
@@ -264,6 +286,8 @@ class BrainFrame(wx.Frame):
         ctrlsizer.Add(h3,0,wx.ALIGN_CENTER)
         ctrlsizer.AddSpacer(15)
         ctrlsizer.Add(self.TextVoxelEnergy, 0, wx.ALIGN_CENTER, 5)
+        ctrlsizer.AddSpacer(10)
+        ctrlsizer.Add(self.TextTiming, 0, wx.ALIGN_CENTER, 5)
         self.pnl3.SetSizer(ctrlsizer)
         
         self.topsizer.Add(self.pnl3, 0, wx.ALL, 10)
@@ -304,6 +328,7 @@ class BrainFrame(wx.Frame):
         self.CtrlSliceZ.Bind(wx.EVT_SPINCTRL, self.move2SliceZ)
         self.CtrlSliceY.Bind(wx.EVT_SPINCTRL, self.move2SliceY)
         self.PCCtrl.Bind(wx.EVT_SPINCTRL, self.PC_Select)
+        self.ANOVACtrl.Bind(wx.EVT_SPINCTRL, self.VoxelSelect)
         self.prev.Bind(wx.EVT_BUTTON, self.prevClick)
         self.next.Bind(wx.EVT_BUTTON, self.nextClick)
         self.play.Bind(wx.EVT_BUTTON, self.playClick)
@@ -377,6 +402,22 @@ class BrainFrame(wx.Frame):
         #print self.principalComponent
         self.updateSlices()
 
+    def VoxelSelect(self,event):
+        n = self.ANOVACtrl.GetValue()
+        ind  = self.ANOVA_ind[n-1] #takes the nth best voxel
+        self.slice_y = ind%self.len_y #y axis
+        rest = ind/self.len_y 
+        self.slice_x = rest%self.len_x #x axis
+        self.slice_z = rest/self.len_x #z axis
+        self.CtrlSliceY.SetValue(self.slice_y)
+        self.CtrlSliceX.SetValue(self.slice_x)
+        self.CtrlSliceZ.SetValue(self.slice_z)
+        self.cursorXY.current_position = self.slice_y , self.slice_x
+        self.cursorYZ.current_position = self.slice_y , self.slice_z
+        self.cursorXZ.current_position = self.slice_x , self.slice_z
+        self.update_voxel_data()
+        self.updateSlices()
+
     def update_voxel_data(self):
         self.vals = self.Data[self.pos_t,:,:,:]
         self.Voxel = self.Data[:,self.slice_x,self.slice_y,self.slice_z]
@@ -394,7 +435,7 @@ class BrainFrame(wx.Frame):
     def update_panel(self):
         self.slider1.SetRange(0,self.num_figs) #set the new range of slider
         self.slider1.SetValue(0)
-        self.trackCounter.SetLabel(" 0 / " + str(self.num_figs)) 
+        self.trackCounter.SetLabel(" 0 / " + str(self.num_figs-1)) 
         self.CtrlSliceX.SetRange(0,self.len_x-1) 
         self.CtrlSliceX.SetValue(self.slice_x) 
         self.CtrlSliceY.SetRange(0,self.len_y-1) 
@@ -451,6 +492,8 @@ class BrainFrame(wx.Frame):
         self.osc.send_frame(self.pos_t)
         self.osc.send_fftPeaks(self.fftPeaks,self.frqsPeaks)
         self.osc.send_voxel_coordinates([self.slice_x,self.slice_y,self.slice_z])
+        self.osc.send_best_voxels(self.ANOVAvoxels[self.pos_t,:])
+        self.osc.send_stimulus(self.timing[self.pos_t])
     
     def slider2Update(self, event):
         self.volumeLevel = float(self.slider2.GetValue())/100.0 #to set the volume in range [0 1]
@@ -468,12 +511,15 @@ class BrainFrame(wx.Frame):
     def slider1Update(self, event):
         # get the slider position
         self.pos_t = self.slider1.GetValue() 
-        self.trackCounter.SetLabel(" " + str(self.pos_t) + " / " + str(self.num_figs))      
+        self.trackCounter.SetLabel(" " + str(self.pos_t) + " / " + str(self.num_figs-1))      
         self.vals = self.Data[self.pos_t,:,:,:]
         string= "Voxel Energy: %.2f" % self.Data[self.pos_t,self.slice_x,self.slice_y,self.slice_z]
         self.TextVoxelEnergy.SetLabel(string)
+        self.TextTiming.SetLabel(self.timingNames[self.timing[self.pos_t]])
+
         self._update_model()
         self._update_images()
+        self.updateOSC()
         
         
     def prevClick(self, event):
@@ -489,37 +535,6 @@ class BrainFrame(wx.Frame):
             self.slider1.SetValue(self.slider1.GetValue()+1)
             self.slider1Update(event)
             #print "next_click: ", self.pos1
-
-    def VoxelSelect(self,event):
-        n = self.bestVoxelsCtrl.GetValue()
-        #ind  = self.voxels_ind[n-1] #takes the nth best voxel
-        self.slice_y = ind%self.len_y #y axis
-        rest = ind/self.len_y 
-        self.slice_x = rest%self.len_x #x axis
-        self.slice_z = rest/self.len_x #z axis
-        self.CtrlSliceY.SetValue(self.slice_y)
-        self.CtrlSliceX.SetValue(self.slice_x)
-        self.CtrlSliceZ.SetValue(self.slice_z)
-        self.cursorXY.current_position = self.slice_y , self.slice_x
-        self.cursorYZ.current_position = self.slice_y , self.slice_z
-        self.cursorXZ.current_position = self.slice_x , self.slice_z
-        self.updateSlices()
-        
-    def SetVoxelSelect(self,n):
-        self.bestVoxelsCtrl.SetValue(n)
-        #ind  = self.voxels_ind[n-1] #takes the nth best voxel
-        self.slice_y = ind%self.len_y #y axis
-        rest = ind/self.len_y 
-        self.slice_x = rest%self.len_x #x axis
-        self.slice_z = rest/self.len_x #z axis
-        self.CtrlSliceY.SetValue(self.slice_y)
-        self.CtrlSliceX.SetValue(self.slice_x)
-        self.CtrlSliceZ.SetValue(self.slice_z)
-        self.cursorXY.current_position = self.slice_y , self.slice_x
-        self.cursorYZ.current_position = self.slice_y , self.slice_z
-        self.cursorXZ.current_position = self.slice_x , self.slice_z
-        self.updateSlices()
-
 
     def OnTimer(self, event):
         # Set the slider position
@@ -559,11 +574,11 @@ class BrainFrame(wx.Frame):
             self.slider1Update(event)
         else:
             self.timer.Stop()
-            elf.osc.send_PC(num.zeros(self.numPC))
+            self.osc.send_PC(num.zeros(self.numPC))
         
     def pauseClick(self, event):
         self.timer.Stop()
-        self.osc.send_best_voxels(num.zeros(self.numPC))
+        self.osc.send_best_voxels(num.zeros(self.numANOVA_voxels))
             
     def OnExit(self, event):
         self.timer.Stop()
@@ -754,14 +769,14 @@ class BrainFrame(wx.Frame):
                                  resizable='v',
                                  width=30, height = 100)"""
                                  
-        lTasksName = ['DB','DN','VB','VN']
+
         # Create data series to plot
         timeplot = Plot(self.plotdataVoxel, resizable= 'hv', padding=20)
         timeplot.x_axis.title = "Frames"
         timeplot.plot("TimeVoxel", color = 'lightblue', line_width=1.0, bgcolor="white", name = "Time")[0]
-        """for i in range(len(self.tasks)):
-                timeplot.plot("task" + str(i),color=tuple(COLOR_PALETTE[i]), 
-                line_width=1.0, bgcolor = "white", border_visible=True, name = lTasksName[i])[0]"""
+        # for i in range(len(self.tasks)):
+        #         timeplot.plot(self.timingNames[i+2],color=tuple(COLOR_PALETTE[i]), 
+        #         line_width=1.0, bgcolor = "white", border_visible=True, name = self.timingNames[i+2])[0]
         
         timeplot.legend.visible = True
         timeplot.plot("time", type = "scatter",color=tuple(COLOR_PALETTE[2]), line_width=1, bgcolor = "white", border_visible=True, 
