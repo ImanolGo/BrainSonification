@@ -185,7 +185,10 @@ class BrainFrame(wx.Frame):
             rest = ind/self.len_y 
             i = rest%self.len_x #x axis
             k = rest/self.len_x #z axis
-            self.ANOVAvoxels.append(self.Data[:,i,j,k])
+            maxVal = self.Data[:,i,j,k].max()
+            minVal = self.Data[:,i,j,k].min()
+            self.ANOVAvoxels.append((self.Data[:,i,j,k]-minVal)/(maxVal-minVal))
+            #self.ANOVAvoxels.append(self.Data[:,i,j,k])
 
             line = "%.4f" % ((i-(self.len_x-1)*0.5)/(self.len_x-1)*0.5)
             line += " %.4f" % ((j-(self.len_y-1)*0.5)/(self.len_y-1)*0.5)
@@ -209,9 +212,9 @@ class BrainFrame(wx.Frame):
         self.TextSliceX = wx.StaticText(self.pnl3, -1, 'X: ')
         self.TextSliceY = wx.StaticText(self.pnl3, -1, 'Y: ')
         self.TextSliceZ = wx.StaticText(self.pnl3, -1, 'Z: ')
-        self.CtrlSliceX  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=42)
-        self.CtrlSliceY  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=51)
-        self.CtrlSliceZ  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=28)
+        self.CtrlSliceX  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=41)
+        self.CtrlSliceY  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=50)
+        self.CtrlSliceZ  = wx.SpinCtrl(self.pnl3, -1, '0', min=0, max=27)
         self.ANOVAText = wx.StaticText(self.pnl3, -1, 'Select ANOVA Voxel')
         self.ANOVACtrl  = wx.SpinCtrl(self.pnl3, -1, '1', min=1, max=self.numANOVA_voxels)
         self.TextTiming = wx.StaticText(self.pnl3, -1, self.timingNames[0])
@@ -232,7 +235,7 @@ class BrainFrame(wx.Frame):
         self.MinSlider3 = 125
         self.slider1 = wx.Slider(self.pnl2, -1, 0, 0, self.num_figs)
         self.slider2 = wx.Slider(self.pnl2, -1, 0, 0, 100, size=(120, -1))
-        self.slider3 = wx.Slider(self.pnl2, -1, (self.MaxSlider3 - self.MinSlider3), self.MinSlider3, self.MaxSlider3, size=(120, -1))
+        self.slider3 = wx.Slider(self.pnl2, -1, (self.MinSlider3), self.MinSlider3, self.MaxSlider3, size=(120, -1))
         self.pos_slider1 = self.slider1.GetValue()
         self.pos_slider2 = self.slider2.GetValue()
         self.pos_slider3 = self.slider3.GetValue()
@@ -492,8 +495,9 @@ class BrainFrame(wx.Frame):
         self.osc.send_frame(self.pos_t)
         self.osc.send_fftPeaks(self.fftPeaks,self.frqsPeaks)
         self.osc.send_voxel_coordinates([self.slice_x,self.slice_y,self.slice_z])
-        self.osc.send_best_voxels(self.ANOVAvoxels[self.pos_t,:])
+        self.osc.send_best_voxels(self.ANOVAvoxels[:,self.pos_t])
         self.osc.send_stimulus(self.timing[self.pos_t])
+        self.osc.send_pca_connections(self.ANOVAvoxels[:,self.pos_t],utils.make_connection_matrix(self.pca.components_[:,self.pos_t]))
     
     def slider2Update(self, event):
         self.volumeLevel = float(self.slider2.GetValue())/100.0 #to set the volume in range [0 1]
@@ -569,7 +573,6 @@ class BrainFrame(wx.Frame):
     def playClick(self, event):
         # update clock every 0.5 seconds (500ms)
         self.timer.Start(self.clkFreq)
-        #self.audioServer.gui(locals())
         if(self.slider1.GetValue()<self.num_figs):  
             self.slider1Update(event)
         else:
